@@ -7,10 +7,11 @@
 ;; Roadmap
 ;; 1) get the gui up and running
 ;; 2) serialize/unserialize list ;;(serialize apps)
+;;    --file for most common/favorites, history, etc.
 ;; 3) keep process running, use keybindings to show/hide gui
 
 
-;; Improvements:n
+;; Improvements:
 ;; 1) get exec values from .desktop files and use those in the search
 ;; 2) improvements to matching-> see below @ regexp-match-app
 
@@ -18,21 +19,23 @@
   (class object%
 
 		 ;;create gui
-		 (define frame (new frame% [label "Test"]
-							[width 400]
-							[height 75]
-							[style (list 'no-resize-border 'no-caption)]
-							[alignment (list 'center 'center)]
-							[callback (lambda (t e)
-										(display (get-field event-type e)))]))
-		 (define textbox (new text-field% [parent frame]
-							  [label #f]
-							  [callback (lambda (t e)
-										  (display t))]))
-		 (define listbox (new list-box% [parent frame]
-							  [label #f]
-							  [choices (list "hi" "bye")]))
-		 (send frame show #t)
+		 (define rlw (new frame% [label "Racket Launcher"]
+		 					[width 400]
+		 					[height 75]
+		 					[style (list 'no-resize-border 'no-caption)]
+		 					[alignment (list 'center 'center)]))
+		 (send rlw center 'both)
+		 ;;(send frame on-subwindow-char frame 'text-field-enter)
+		 ;;(send frame on-subwindow-char frame 'text-field-enter)
+
+		 (define textbox (new text-field% [parent rlw]
+		 					  [label #f]
+		 					  [callback (lambda (t e)
+		 								  (display t))]))
+		 (define listbox (new list-box% [parent rlw]
+		 					  [label #f]
+		 					  [choices (list "hi" "bye")]))
+		 (send rlw show #t)
 		 
 		 ;;get environment paths to generate list of applications
 		 (define (getpath envname)
@@ -98,7 +101,8 @@
 (define inputstr "")
 (if (< 0 (vector-length (current-command-line-arguments)))
 	(set! inputstr (vector-ref (current-command-line-arguments) 0)) #f)
+
+;;initialize racket_launcer object-- creates gui
 (define rkt (new racket_launcher%))
-;;(send rkt filter-input-string inputstr)
 
 
