@@ -18,25 +18,6 @@
 (define racket_launcher%
   (class object%
 
-		 ;;create gui
-		 (define rlw (new frame% [label "Racket Launcher"]
-		 					[width 400]
-		 					[height 75]
-		 					[style (list 'no-resize-border 'no-caption)]
-		 					[alignment (list 'center 'center)]))
-		 (send rlw center 'both)
-		 ;;(send frame on-subwindow-char frame 'text-field-enter)
-		 ;;(send frame on-subwindow-char frame 'text-field-enter)
-
-		 (define textbox (new text-field% [parent rlw]
-		 					  [label #f]
-		 					  [callback (lambda (t e)
-		 								  (display t))]))
-		 (define listbox (new list-box% [parent rlw]
-		 					  [label #f]
-		 					  [choices (list "hi" "bye")]))
-		 (send rlw show #t)
-		 
 		 ;;get environment paths to generate list of applications
 		 (define (getpath envname)
 		   (path-list-string->path-list (getenv envname) empty))
@@ -89,18 +70,49 @@
 
 		 ;;get all apps to be searched
 		 (define apps (map (lambda (li)
-		 					(check-desktop-files li (getpath "XDG_DATA_DIRS")))
-						   (merge-lists (map getdir (getpath "PATH")) empty)))
+		 					 (check-desktop-files li (getpath "XDG_DATA_DIRS")))
+		 				   (merge-lists (map getdir (getpath "PATH")) empty)))
 
+		 ;;create gui
+		 (define rlw (new (class frame%
+								 (super-new)
+								 (define/override (on-traverse-char e)
+								   (define keycode (send e get-key-code))
+								   (cond
+									[(equal? keycode #\return) (handle-enter)]
+									[(equal? keycode 'escape) (send this show #f)]
+									[else #f]))
+								 (define (handle-enter)
+								   ;;handle incoming enters-launch current program, hide box
+								   (display (send listbox get-string-selection))
+								   ;;(subprocess #f #f #f (get-process))
+								   (send this show #f) #t))
+						  [label "Racket Launcher"]
+						  [width 400]
+						  [height 75]
+						  [style (list 'no-resize-border 'no-caption)]
+						  [alignment (list 'center 'center)]))
+		 (send rlw center 'both)
+
+		 (define textbox (new text-field% [parent rlw]
+		 					  [label #f]
+		 					  [callback (lambda (t e)
+		 								  (update-listbox (filter-input-string
+														   (send t get-value))))]))
+		 ;;use 'get-data' and 'set-data'-> match labels, set items
+		 (define listbox (new list-box% [parent rlw]
+		 					  [label #f]
+		 					  [choices (list "mirage" "rhythmbox")]))
+		 (send rlw show #t)
+
+		 ;;use this to update the listbox when text is entered
+		 (define (update-listbox items)
+		   (length items) #f)
+		 
 		 ;;to be called on user input
-		 (define/public (filter-input-string str)
+		 (define (filter-input-string str)
 		   (filter (lambda (li) (filter-app-str li str)) apps))
 		 (super-new)))
-
-;;user in- will be changed when gui
-(define inputstr "")
-(if (< 0 (vector-length (current-command-line-arguments)))
-	(set! inputstr (vector-ref (current-command-line-arguments) 0)) #f)
 
 ;;initialize racket_launcer object-- creates gui
 (define rkt (new racket_launcher%))
