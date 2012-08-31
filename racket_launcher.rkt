@@ -24,25 +24,25 @@
 		   (path-list-string->path-list (getenv envname) empty))
 		 
 		 ;;get all files from each path directory, filtering out directories
-		 (define (getdir path withpath)
-		   (define tmp-arr empty)
-		   (if withpath
-			   (filter file-exists? (directory-list path #:build? path))
-			   ((lambda ()
-				 (for-each (lambda (file)
-							 ;;if file-exists? strip path and return name
-							 (cond [(file-exists? file)
-									(set! tmp-arr (append tmp-arr (let-values ([(path name dir)
-																				(split-path file)])
-																	(list (path->string name)))))]))
-						   (directory-list path #:build? path)) tmp-arr))))
+		 ;; (define (getdir path withpath)
+		 ;;   (define tmp-arr empty)
+		 ;;   (if withpath
+		 ;; 	   (filter file-exists? (directory-list path #:build? path))
+		 ;; 	   ((lambda ()
+		 ;; 		 (for-each (lambda (file)
+		 ;; 					 ;;if file-exists? strip path and return name
+		 ;; 					 (cond [(file-exists? file)
+		 ;; 							(set! tmp-arr (append tmp-arr (let-values ([(path name dir)
+		 ;; 																		(split-path file)])
+		 ;; 															(list (path->string name)))))]))
+		 ;; 				   (directory-list path #:build? path)) tmp-arr))))
 
 		 
 		 ;;merges list of lists into single list
-		 (define (merge-lists lists newlist)
-		   (if (empty? lists)
-			   newlist
-			   (merge-lists (rest lists) (append (first lists) newlist))))
+		 ;; (define (merge-lists lists newlist)
+		 ;;   (if (empty? lists)
+		 ;; 	   newlist
+		 ;; 	   (merge-lists (rest lists) (append (first lists) newlist))))
 
 		 ;;reads the name from the .desktop file
 		 (define (get-desktop-file-name file)
@@ -59,29 +59,29 @@
 		 ;;   2) allow typos, close matches
 		 ;;   3) allow regexps, only sometimes
 		 ;;   4) allow path searching 
-		 (define (regexp-match-app app str)
-		   (regexp-match (regexp (string-append "(?i:^" str ")")) app))
+		 ;; (define (regexp-match-app app str)
+		 ;;   (regexp-match (regexp (string-append "(?i:^" str ")")) app))
 		 
 		 ;;take in a string and an app pair, returns #t if matches
-		 (define (filter-app-str app str)
-		   (if (pair? app)
-			   (regexp-match-app (car app) str)
-			   (regexp-match-app app str)))
+		 ;; (define (filter-app-str app str)
+		 ;;   (if (pair? app)
+		 ;; 	   (regexp-match-app (car app) str)
+		 ;; 	   (regexp-match-app app str)))
 		 
 		 ;;combines names for each app
-		 (define (check-desktop-files appdirs)
-		   (define dfiles empty)
-		   (define out empty)
-		   (for-each (lambda (dir)
-					   (set! dir (build-path dir "applications"))
-					   (cond [(directory-exists? dir)
-							  (set! dfiles (append (getdir dir #t) dfiles))])) appdirs)
-		   (for-each (lambda (file)
-					   (define tmp (get-desktop-file-name file))
-					   ;;if not null and name != exec, add to list
-					   (cond [(and (not (null? tmp))
-								   (not (string-ci=? (car tmp) (cdr tmp))))
-							  (set! out (append out (list tmp)))])) dfiles) out)
+		 ;; (define (check-desktop-files appdirs)
+		 ;;   (define dfiles empty)
+		 ;;   (define out empty)
+		 ;;   (for-each (lambda (dir)
+		 ;; 			   (set! dir (build-path dir "applications"))
+		 ;; 			   (cond [(directory-exists? dir)
+		 ;; 					  (set! dfiles (append (getdir dir #t) dfiles))])) appdirs)
+		 ;;   (for-each (lambda (file)
+		 ;; 			   (define tmp (get-desktop-file-name file))
+		 ;; 			   ;;if not null and name != exec, add to list
+		 ;; 			   (cond [(and (not (null? tmp))
+		 ;; 						   (not (string-ci=? (car tmp) (cdr tmp))))
+		 ;; 					  (set! out (append out (list tmp)))])) dfiles) out)
 		 		 
 		 ;;get all apps to be searched
 		 ;; if pair, then second is data
@@ -90,11 +90,7 @@
 		   (if (> (hash-count apps) 0)
 			   apps
 			   ((lambda ()
-				  ;; 1) get files
-				  ;; 2) foreach file, split name into characters
-				  ;; 3) create hash at each letter
-				  ;; 4) if final letter, mark that hash as a terminal one
-				  (define paths (getpath "PATH"))
+				  (define paths (filter directory-exists? (getpath "PATH")))
 				  (for-each (lambda (path)
 							  (define files (directory-list path #:build? path))
 							  (cond [files
@@ -104,11 +100,22 @@
 														   (let ([splits (regexp-split #rx"" name)])
 															 (define final-hash (trie-add apps splits))
 															 ;;get terminal hash and save data there for execution
+															 (hash-set! final-hash "name" name)
 															 (hash-set! final-hash "exec" file))]))) files)])) paths)
-				  
-				  ;;TODO: finish-- get .desktop files now
-				  (set! paths (getpath "XDG_DATA_DIRS"))
-				  
+				  ;;adds desktop files
+				  (set! paths (filter directory-exists? (getpath "XDG_DATA_DIRS")))
+				  (for-each (lambda (path)
+							  (define files (directory-list path #:build? path))
+							  (cond [files
+									 (for-each (lambda (file)
+												 (cond [(file-exists? file)
+														(define desktop (get-desktop-file-name file))
+														(cond [(not (null? desktop))	
+															   (let ([splits (regexp-split #rx"" (car desktop))])
+																 (define final-hash (trie-add apps splits))
+																 (hash-set! final-hash "name" (car desktop))
+																 (hash-set! final-hash "exec" (cdr desktop)))])]))
+											   files)])) paths)
 				  apps))))
 		 
 		 (define (trie-add hash strs)
@@ -116,6 +123,11 @@
 		   (if (empty? strs) hash
 			   (if (equal? (first strs) "") (trie-add hash (rest strs))
 				   (trie-add (hash-ref! hash (first strs) (make-hash)) (rest strs)))))
+		 
+		 (define (traverse-trie hash strs)
+		   (if (or (empty? strs) (not hash)) hash
+			   (if (equal? (first strs) "") (traverse-trie hash (rest strs))
+				   (traverse-trie (hash-ref hash (first strs) #f) (rest strs)))))
 
 		 ;; (define apps empty)
 		 ;; (define (get-apps)
@@ -131,8 +143,8 @@
 		 ;; 		  (set! apps (append pathapps desktopapps)) apps)) apps))
 		 
 		 ;;to be called on user input
-		 (define (filter-input-string str)
-		   (filter (lambda (li) (filter-app-str li str)) (get-apps)))
+		 ;; (define (filter-input-string str)
+		 ;;   (filter (lambda (li) (filter-app-str li str)) (get-apps)))
 
 		 ;;create gui
 		 (define rlw (new (class frame%
@@ -207,8 +219,8 @@
 		 (define textbox (new text-field% [parent rlw]
 		 					  [label #f]
 		 					  [callback (lambda (t e)
-		 								  (update-listbox (filter-input-string
-														   (send t get-value))))]))
+		 								  (update-listbox (send t get-value)))]))
+		 
 		 ;;use 'get-data' and 'set-data'-> match labels, set items
 		 (define listbox (new list-box% [parent rlw]
 		 					  [label #f]
@@ -216,21 +228,21 @@
 							  [style (list 'single)]))
 		 
 		 ;;use this to update the listbox when text is entered
-		 (define (update-listbox items)
+		 (define (update-listbox str)
 		   (send listbox clear)
-		   (for-each (lambda (app)
-					   (cond [(pair? app) (send listbox append (car app)
-												(cdr app))]
-							 [else (send listbox append app #f)])) items))
+		   ;;traverse trie and find all values
+		   (define splits (regexp-split #rx"" str))
+		   (define root (traverse-trie apps splits))
+		   (display root)
+		   (newline))
 
 		 ;;show gui
-		 
-		 ;;(send rlw show #t)
+		 (send rlw show #t)
 		 ;;get apps
 		 ;;TODO: serialize/cache
-		 ;;(update-listbox (get-apps))
-		 ;;(get-apps)
-		 (display (get-apps))
+		 (update-listbox "")
+		 (get-apps)
+		 ;;(display (get-apps))
 		 
 		 )) ;;end racket_launcher object
 
