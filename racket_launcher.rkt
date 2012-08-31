@@ -81,25 +81,54 @@
 					   ;;if not null and name != exec, add to list
 					   (cond [(and (not (null? tmp))
 								   (not (string-ci=? (car tmp) (cdr tmp))))
-							  (set! out (append out (list tmp)))])) dfiles)
-		   out)
+							  (set! out (append out (list tmp)))])) dfiles) out)
 		 		 
 		 ;;get all apps to be searched
 		 ;; if pair, then second is data
-		 (define apps empty)
+		 (define apps (make-hash))
 		 (define (get-apps)
-		   (if (empty? apps)
-			   ;;TODO: parse for duplicates as .desktop files are being read in
-			   ;;      as well as #fs
+		   (if (> (hash-count apps) 0)
+			   apps
 			   ((lambda ()
-				  (define pathapps (merge-lists (map (lambda (dir)
-													   (getdir dir #f))
-													 (getpath "PATH")) empty))
-				  (define desktopapps (check-desktop-files
-											   (getpath "XDG_DATA_DIRS")))
-				  (set! apps (append pathapps desktopapps))
-				  apps))
-			   apps))
+				  ;; 1) get files
+				  ;; 2) foreach file, split name into characters
+				  ;; 3) create hash at each letter
+				  ;; 4) if final letter, mark that hash as a terminal one
+				  (define paths (getpath "PATH"))
+				  (for-each (lambda (path)
+							  (define files (directory-list path #:build? path))
+							  (cond [files
+									  (for-each (lambda (file)
+												  (let-values ([(path name dir?) (split-path file)])
+													(cond [(not dir?) 
+														   (let ([splits (regexp-split #rx"" name)])
+															 (define final-hash (trie-add apps splits))
+															 ;;get terminal hash and save data there for execution
+															 (hash-set! final-hash "exec" file))]))) files)])) paths)
+				  
+				  ;;TODO: finish-- get .desktop files now
+				  (set! paths (getpath "XDG_DATA_DIRS"))
+				  
+				  apps))))
+		 
+		 (define (trie-add hash strs)
+		   ;;if strs empty, return hash
+		   (if (empty? strs) hash
+			   (if (equal? (first strs) "") (trie-add hash (rest strs))
+				   (trie-add (hash-ref! hash (first strs) (make-hash)) (rest strs)))))
+
+		 ;; (define apps empty)
+		 ;; (define (get-apps)
+		 ;;   (if (empty? apps)
+		 ;; 	   ;;TODO: parse for duplicates as .desktop files are being read in
+		 ;; 	   ;;      as well as #fs
+		 ;; 	   ((lambda ()
+		 ;; 		  (define pathapps (merge-lists (map (lambda (dir)
+		 ;; 											   (getdir dir #f))
+		 ;; 											 (getpath "PATH")) empty))
+		 ;; 		  (define desktopapps (check-desktop-files
+		 ;; 									   (getpath "XDG_DATA_DIRS")))
+		 ;; 		  (set! apps (append pathapps desktopapps)) apps)) apps))
 		 
 		 ;;to be called on user input
 		 (define (filter-input-string str)
@@ -108,40 +137,70 @@
 		 ;;create gui
 		 (define rlw (new (class frame%
 								 (super-new)
+								 ;;to override mouse events
+								 ;;if user changes selection
+								 ;; (define/override (on-subwindow-event e)
+								 ;;   )
 								 (define/override (on-traverse-char e)
 								   (define keycode (send e get-key-code))
 								   (cond
-									;;TODO:
-									;;if tab autocomplete
-									;;if down arrow, start navigating listbox
+									;;TODO: add emacs- style navigation
+									;;CTRL key (backspace,fb,np)
+									[(equal? keycode #\tab) (handle-tab)]
 									[(equal? keycode #\return) (handle-enter)]
 									[(equal? keycode 'escape) (send this show #f)]
-									[(equal? keycode 'down) (handle-vertical-arrows #f)]
-									[(equal? keycode 'up) (handle-vertical-arrows #t)]
-									;; [(equal? keycode 'right) (handle-horizontal-arrows #f)]
-									;; [(equal? keycode 'left) (handle-horizontal-arrows #t)]
+									[(equal? keycode 'down) (scroll-selection #f)]
+									[(equal? keycode 'up) (scroll-selection #t)]
+									;;TODO:send to textarea no matter focus
+									[(or (equal? keycode 'right) (equal? keycode 'left))
+									 (handle-horizontal-arrows #f e)]
 									[else #f]))
+								 
+								 ;;tabs- autocomplete
+								 (define (handle-tab)
+								   ;;if equals first selection, increment and get next
+								   (define str (send listbox get-string-selection))
+								   (define text (send textbox get-value))
+								   (cond [(string-ci=? text str) ((lambda()
+																	(scroll-selection #f)
+																	(set! str (send listbox get-string-selection))))])
+								   (send textbox set-value str) #t)
+								 
 								 ;;if left/right arrows, focus textbox, move
-								 (define (handle-horizontal-arrows left)
-								   ;;(send key-event to text area if not there)
-								   (display left))
-								 (define (handle-vertical-arrows up)
+								 (define (handle-horizontal-arrows left e)
+								   (send textbox on-subwindow-char this e) #t)
+								 
+								 ;;handle up and down arrows
+								 (define (scroll-selection up)
 								   (define selection (send listbox get-selection))
-								   ;;TODO: handle 0/length cases
-								   (send listbox set-selection
-										 (if up (- selection 1)
-											 (+ selection 1))))
+								   (if selection
+									   ((lambda ()
+										  ;;wrap around?
+										  (cond [(and up (> selection 0))
+												 (set! selection (- selection 1))]
+												[(and (not up) (< selection (- (send listbox get-number) 1)))
+												 (set! selection (+ selection 1))])
+										  (send listbox set-selection selection)
+										  (send listbox set-first-visible-item selection))) #f))
+
+								 ;;on enter:launch current program, hide box
+								 ;;use get-data to get correct executable
 								 (define (handle-enter)
-								   ;;on enter:launch current program, hide box
-								   ;;use get-data to get correct executable
-								   (define cmd (send listbox get-data (send listbox get-selection)))
-								   (cond [(not cmd) (set! cmd (send listbox get-string-selection))])
-								   (subprocess #f #f #f (find-executable-path cmd))
-								   (send this show #f) #t))
+								   (define cmd (send listbox get-selection))
+								   (if (not cmd) (set! cmd (send textbox get-value))
+									   ((lambda ()
+										  (set! cmd (send listbox get-data cmd))
+										  (cond [(not cmd) (set! cmd (send listbox get-string-selection))]))))
+								   (define splits (regexp-split #rx" " cmd))
+								   (set! cmd (first splits))
+								   (subprocess #f #f #f (find-executable-path cmd) (string-join (rest splits)))
+								   (send this show #f) #t)
+								 
+								 ) ;;end new frame class
 						  [label "Racket Launcher"]
 						  [width 400]
 						  [height 75]
-						  [style (list 'no-resize-border 'no-caption)]
+						  [style (list 'no-resize-border 'no-caption)] ;;(list 'no-caption)]
 						  [alignment (list 'center 'center)]))
 		 (send rlw center 'both)
 
@@ -165,13 +224,15 @@
 							 [else (send listbox append app #f)])) items))
 
 		 ;;show gui
-		 (send rlw show #t)
+		 
+		 ;;(send rlw show #t)
 		 ;;get apps
 		 ;;TODO: serialize/cache
-		 (update-listbox (get-apps))
+		 ;;(update-listbox (get-apps))
+		 ;;(get-apps)
+		 (display (get-apps))
 		 
-		 ;;end racket_launcher object
-		 ))
+		 )) ;;end racket_launcher object
 
 ;;initialize racket_launcer object-- creates gui
 ;;do if proc exists here and call it?
