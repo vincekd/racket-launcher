@@ -38,8 +38,9 @@
 						(cond [(equal? key "name")
 							   (selected-app value (hash-ref trie "exec"))]
 							  [(not (equal? key "exec"))
-							   (traverse-trie value)]))))
-							   ;;(thread (lambda () (traverse-trie value)))]))))
+							   ;;(traverse-trie value)]))))
+							   (thread (lambda ()
+										 (traverse-trie value)))]))))
 (define (cull-list hasht str)
   (define root (get-root hasht (regexp-split #rx"" (string-trim str))))
   (if (not root) #f
@@ -48,22 +49,22 @@
 ;;define & get apps
 (define apps (make-hash))
 ;;make these into recursive lambda functions, then thread them
-;;(define thd (thread (lambda ()
-(for-each (lambda (path)
-			(define files (directory-list path #:build? path))
-			(cond [files
-				   (for-each (lambda (file)
-							   (let-values ([(path name dir?) (split-path file)])
-								 (cond [(not dir?)
-										((lambda ()
-										   (set! name (path->string name))
-										   (let ([splits (regexp-split #rx"" (string-downcase name))])
-											 (define final-hash (trie-add apps splits))
-											 ;;get terminal hash and save data there for execution
-											 (hash-set! final-hash "name" name)
-											 (hash-set! final-hash "exec" file))))]))) files)]))
-		  (filter directory-exists? (getpath "PATH")))
-;;)))
+(define thd (thread
+			 (lambda ()
+			   (for-each (lambda (path)
+						   (define files (directory-list path #:build? path))
+						   (cond [files
+								  (for-each (lambda (file)
+											  (let-values ([(path name dir?) (split-path file)])
+												(cond [(not dir?)
+													   ((lambda ()
+														  (set! name (path->string name))
+														  (let ([splits (regexp-split #rx"" (string-downcase name))])
+															(define final-hash (trie-add apps splits))
+															;;get terminal hash and save data there for execution
+															(hash-set! final-hash "name" name)
+															(hash-set! final-hash "exec" file))))]))) files)]))
+						 (filter directory-exists? (getpath "PATH"))))))
 ;;adds desktop files
 (for-each (lambda (path)
 			(define files (directory-list path #:build? path))
@@ -81,9 +82,10 @@
 													  (build-path path "applications"))
 													(getpath "XDG_DATA_DIRS"))))
 
-;;(thread-wait thd)
+(thread-wait thd)
 
 (cull-list apps "aa")
+(sleep .001)
 
 ;;get gui
 

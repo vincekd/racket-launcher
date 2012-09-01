@@ -171,6 +171,7 @@
 		 
 		 ;;use this to update the listbox when text is entered
 		 (define (update-listbox str)
+		   ;;TODO: don't clear every time?
 		   (send listbox clear)
 		   ;;traverse trie and find all values
 		   (define root (get-root apps (regexp-split #rx"" (string-trim str))))
