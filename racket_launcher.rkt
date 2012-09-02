@@ -1,9 +1,7 @@
-#!/usr/bin/racket
+#!/usr/bin/gracket
 
 #lang racket
-(require racket/base)
-;;(require racket/class)
-(require racket/gui/base)
+(require racket/base racket/gui/base)
 
 ;; Roadmap
 ;; 1) hash
@@ -11,8 +9,6 @@
 ;;    --file for most common/favorites, history, etc.
 ;; 3) keep process running, use keybindings to show/hide gui
 ;; 4) speed up somehow
-
-
 
 (define racket_launcher%
   (class object%
@@ -188,7 +184,7 @@
 										(traverse-trie value)]))))
 
 		 ;;show gui
-		 (send rlw show #t)
+		 ;;(send rlw show #t)
 		 ;;get apps
 		 ;;TODO: serialize/cache
 		 (get-apps)

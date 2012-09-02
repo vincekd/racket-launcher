@@ -1,8 +1,8 @@
-#!/usr/bin/racket
+#!/usr/bin/gracket
 
-#lang racket
+#lang racket/base
 
-(require racket/base)
+(require racket/string racket/list racket/file racket/class racket/udp)
 ;;(require racket/gui/base)
 
 ;;get environment paths to generate list of applications
@@ -29,65 +29,176 @@
 	  (if (equal? (first strs) "") (get-root hasht (rest strs))
 		  (get-root (hash-ref hasht (first strs) #f) (rest strs)))))
 
-(define (selected-app name exec)
-  (display name)
-  (newline))
-
-(define (traverse-trie trie)
+(define (traverse-trie trie proc)
   (hash-for-each trie (lambda (key value)
 						(cond [(equal? key "name")
-							   (selected-app value (hash-ref trie "exec"))]
+							   (proc value (hash-ref trie "exec"))]
 							  [(not (equal? key "exec"))
-							   ;;(traverse-trie value)]))))
-							   (thread (lambda ()
-										 (traverse-trie value)))]))))
-(define (cull-list hasht str)
-  (define root (get-root hasht (regexp-split #rx"" (string-trim str))))
-  (if (not root) #f
-	  (traverse-trie root)))
+							   (traverse-trie value proc)]))))
 
 ;;define & get apps
 (define apps (make-hash))
 ;;make these into recursive lambda functions, then thread them
-(define thd (thread
-			 (lambda ()
-			   (for-each (lambda (path)
-						   (define files (directory-list path #:build? path))
-						   (cond [files
-								  (for-each (lambda (file)
-											  (let-values ([(path name dir?) (split-path file)])
-												(cond [(not dir?)
-													   ((lambda ()
-														  (set! name (path->string name))
-														  (let ([splits (regexp-split #rx"" (string-downcase name))])
-															(define final-hash (trie-add apps splits))
-															;;get terminal hash and save data there for execution
-															(hash-set! final-hash "name" name)
-															(hash-set! final-hash "exec" file))))]))) files)]))
-						 (filter directory-exists? (getpath "PATH"))))))
-;;adds desktop files
-(for-each (lambda (path)
-			(define files (directory-list path #:build? path))
-			(cond [files
-				   (for-each (lambda (file)
-							   (cond [(file-exists? file)
-									  (define desktop (get-desktop-file-name file))
-									  (cond [(not (null? desktop))	
-											 (let ([splits (regexp-split #rx"" (string-downcase (car desktop)))])
-											   (define final-hash (trie-add apps splits))
-											   (hash-set! final-hash "name" (car desktop))
-											   (hash-set! final-hash "exec" (cdr desktop)))])]))
-							 files)])) (filter directory-exists?
-											   (map (lambda (path)
-													  (build-path path "applications"))
-													(getpath "XDG_DATA_DIRS"))))
+;;recursively through paths
+(define (get-paths paths proc)
+  (cond [(or (not paths) (empty? paths)) #f]
+		[(not (directory-exists? (first paths))) (get-paths (rest paths) proc)]
+		;;make proc execute in a new thread and wait for it to return
+		[else (begin
+				(proc (directory-list (first paths) #:build? (first paths)))
+				(get-paths (rest paths) proc))]))
 
-(thread-wait thd)
+(define (get-files files)
+  (cond [(or (not files) (empty? files)) #f]
+		[else (let-values ([(path name dir?) (split-path (first files))])
+				(set! name (string-downcase (path->string name)))
+				(cond [(not dir?) (let ([splits (regexp-split #rx"" name)])
+									(define final-hash (trie-add apps splits))
+									(hash-set! final-hash "name" name)
+									(hash-set! final-hash "exec" (first files)))])
+				(get-files (rest files)))]))
 
-(cull-list apps "aa")
-(sleep .001)
+(define (get-desktop-files files)
+  (cond [(or (not files) (empty? files)) #f]
+		[(file-exists? (first files)) (let ([desktop (get-desktop-file-name (first files))])
+										(if (null? desktop) #f
+											(let ([splits (regexp-split #rx"" (string-downcase (car desktop)))])
+											  (define final-hash (trie-add apps splits))
+											  (hash-set! final-hash "name" (car desktop))
+											  (hash-set! final-hash "exec" (cdr desktop))
+											  (get-desktop-files (rest files)))))]
+		[else (get-desktop-files (rest files))]))
 
 ;;get gui
+;;(define rkt (new (dynamic-require 'racket/gui/base 'frame%) [label "hi"]))
+(define rlw (new (class (dynamic-require 'racket/gui/base 'frame%)
+						(super-new)
+						;;to override mouse events
+						;;if user changes selection
+						;; (define/override (on-subwindow-event e)
+						;;   )
+						(define/override (on-traverse-char e)
+						  (define keycode (send e get-key-code))
+						  (cond
+						   ;;TODO: add emacs- style navigation
+						   ;;CTRL key (backspace,fb,np)
+						   [(equal? keycode #\tab) (handle-tab)]
+						   [(equal? keycode #\return) (handle-enter)]
+						   [(equal? keycode 'escape) (control-racket-launcher #f)]
+						   [(equal? keycode 'down) (scroll-selection #f)]
+						   [(equal? keycode 'up) (scroll-selection #t)]
+						   ;;TODO:send to textarea no matter focus
+						   [(or (equal? keycode 'right) (equal? keycode 'left))
+							(handle-horizontal-arrows #f e)]
+						   [else #f]))
+						
+						;;tabs- autocomplete
+						(define (handle-tab)
+						  ;;if equals first selection, increment and get next
+						  (define str (send listbox get-string-selection))
+						  (define text (send textbox get-value))
+						  (cond [(string-ci=? text str) ((lambda()
+														   (scroll-selection #f)
+														   (set! str (send listbox get-string-selection))))])
+						  (send textbox set-value (string-downcase str)) #t)
+						
+						;;if left/right arrows, focus textbox, move
+						(define (handle-horizontal-arrows left e)
+						  (send textbox on-subwindow-char this e) #f)
+						
+						;;handle up and down arrows
+						(define (scroll-selection up)
+						  (define selection (send listbox get-selection))
+						  (if selection
+							  ((lambda ()
+								 ;;wrap around?
+								 (cond [(and up (> selection 0))
+										(set! selection (- selection 1))]
+									   [(and (not up) (< selection (- (send listbox get-number) 1)))
+										(set! selection (+ selection 1))])
+								 (send listbox set-selection selection)
+								 (send listbox set-first-visible-item selection))) #f))
+
+						;;on enter:launch current program, hide box
+						;;use get-data to get correct executable
+						(define (handle-enter)
+						  (define cmd (send listbox get-selection))
+						  (if (not cmd) (set! cmd (send textbox get-value))
+							  (begin
+								 (set! cmd (send listbox get-data cmd))
+								 (cond [(not cmd) (set! cmd (send listbox get-string-selection))])))
+						  (define splits (regexp-split #rx" " cmd))
+						  (subprocess #f #f #f (find-executable-path
+												(first splits))
+									  (string-join (rest splits)))
+						  ;;(send this show #f)
+						  (control-racket-launcher #f)
+						  #t)
+						
+						) ;;end new frame class
+				 [label "Racket Launcher"]
+				 [width 400]
+				 [height 75]
+				 [style (list 'no-resize-border 'no-caption)]
+				 [alignment (list 'center 'center)]))
+
+;;center on screen
+(send rlw center 'both)
+
+(define (selected-app name exec)
+  (send listbox append name exec))
+
+(define (cull-list hasht str)
+  (define root (get-root hasht (regexp-split #rx"" (string-trim str))))
+  (if (not root) (send listbox clear)
+	  (begin
+		(send listbox clear)
+		(traverse-trie root selected-app))))
+
+;;instantiate textbox
+(define textbox (new (dynamic-require 'racket/gui/base 'text-field%)
+					 [parent rlw]
+					 [label #f]
+					 [callback (lambda (t e)
+								 (cull-list apps
+								  (string-downcase (send t get-value))))]))
+
+;;use 'get-data' and 'set-data'-> match labels, set items
+(define listbox (new (dynamic-require 'racket/gui/base 'list-box%)
+					 [parent rlw]
+					 [label #f]
+					 [choices empty]
+					 [style (list 'single)]))
+
+(define (init-launcher)
+  (set! apps (make-hash))
+  (get-paths (getpath "PATH") get-files)
+  (get-paths (map (lambda (dir)
+					(build-path dir "applications"))
+				  (getpath "XDG_DATA_DIRS")) get-desktop-files)
+  ;;add apps to select box
+  (cull-list apps ""))
+
+;;use on resume event && on suspend events
+(define (control-racket-launcher on)
+  (if on
+	  (begin
+		;;(thread-resume (current-thread))
+		(send rlw show #t)
+		(init-launcher))
+	  (begin
+		(send textbox set-value "")
+		(send rlw show #f)
+	    ;;(port->string current-input-port))))
+		(if (equal? (read-line (current-input-port)) "start")
+			(control-racket-launcher #t)
+			(control-racket-launcher #f)))))
+		;;(thread-suspend (current-thread)))))
+;;(break-thread (current-thread)))))
+
+(control-racket-launcher #t)
+
+(define socket (udp-open-socket "localhost" 34543))
 
 
 
