@@ -1,8 +1,10 @@
 #!/usr/bin/gracket
 
-#lang racket
-(define-values (subproc stdin stdout stderr)
-  (subprocess #f #f #f "main.rkt"))
-(subprocess-pid subproc)
+#lang racket/base
 
+(require racket/udp)
+
+(define socket (udp-open-socket "localhost" 34543))
+(udp-connect! socket "localhost" 34543)
+(udp-send socket (make-bytes 1))
 

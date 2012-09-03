@@ -2,8 +2,8 @@
 
 #lang racket/base
 
-(require racket/string racket/list racket/file racket/class racket/udp)
-;;(require racket/gui/base)
+(require racket/string racket/list racket/file
+		 racket/class racket/udp racket/gui/base)
 
 ;;get environment paths to generate list of applications
 (define (getpath envname)
@@ -60,18 +60,20 @@
 
 (define (get-desktop-files files)
   (cond [(or (not files) (empty? files)) #f]
-		[(file-exists? (first files)) (let ([desktop (get-desktop-file-name (first files))])
-										(if (null? desktop) #f
-											(let ([splits (regexp-split #rx"" (string-downcase (car desktop)))])
-											  (define final-hash (trie-add apps splits))
-											  (hash-set! final-hash "name" (car desktop))
-											  (hash-set! final-hash "exec" (cdr desktop))
-											  (get-desktop-files (rest files)))))]
+		[(file-exists? (first files))
+		 (let ([desktop (get-desktop-file-name (first files))])
+		   (if (null? desktop) #f
+			   (let ([splits
+					  (regexp-split #rx"" (string-downcase (car desktop)))])
+				 (define final-hash (trie-add apps splits))
+				 (hash-set! final-hash "name" (car desktop))
+				 (hash-set! final-hash "exec" (cdr desktop))
+				 (get-desktop-files (rest files)))))]
 		[else (get-desktop-files (rest files))]))
 
 ;;get gui
 ;;(define rkt (new (dynamic-require 'racket/gui/base 'frame%) [label "hi"]))
-(define rlw (new (class (dynamic-require 'racket/gui/base 'frame%)
+(define rlw (new (class frame%
 						(super-new)
 						;;to override mouse events
 						;;if user changes selection
@@ -128,12 +130,13 @@
 								 (set! cmd (send listbox get-data cmd))
 								 (cond [(not cmd) (set! cmd (send listbox get-string-selection))])))
 						  (define splits (regexp-split #rx" " cmd))
-						  (subprocess #f #f #f (find-executable-path
-												(first splits))
-									  (string-join (rest splits)))
-						  ;;(send this show #f)
-						  (control-racket-launcher #f)
-						  #t)
+						  (parameterize ([subprocess-group-enabled #t])
+										(subprocess #f #f #f
+													(find-executable-path
+													 (first splits))
+													(string-join
+													 (rest splits))))
+						  (control-racket-launcher #f) #t)
 						
 						) ;;end new frame class
 				 [label "Racket Launcher"]
@@ -156,7 +159,7 @@
 		(traverse-trie root selected-app))))
 
 ;;instantiate textbox
-(define textbox (new (dynamic-require 'racket/gui/base 'text-field%)
+(define textbox (new text-field%
 					 [parent rlw]
 					 [label #f]
 					 [callback (lambda (t e)
@@ -164,7 +167,7 @@
 								  (string-downcase (send t get-value))))]))
 
 ;;use 'get-data' and 'set-data'-> match labels, set items
-(define listbox (new (dynamic-require 'racket/gui/base 'list-box%)
+(define listbox (new list-box%
 					 [parent rlw]
 					 [label #f]
 					 [choices empty]
@@ -179,26 +182,25 @@
   ;;add apps to select box
   (cull-list apps ""))
 
+;;udp socket
+(define socket (udp-open-socket "localhost" 34543))
+(udp-bind! socket "localhost" 34543)
+
 ;;use on resume event && on suspend events
 (define (control-racket-launcher on)
   (if on
 	  (begin
-		;;(thread-resume (current-thread))
 		(send rlw show #t)
 		(init-launcher))
 	  (begin
 		(send textbox set-value "")
 		(send rlw show #f)
-	    ;;(port->string current-input-port))))
-		(if (equal? (read-line (current-input-port)) "start")
-			(control-racket-launcher #t)
-			(control-racket-launcher #f)))))
-		;;(thread-suspend (current-thread)))))
-;;(break-thread (current-thread)))))
+		(let-values ([(nint str? intin)
+					  (udp-receive! socket (make-bytes 5454))])
+		  (control-racket-launcher #t)))))
+(control-racket-launcher #f)
 
-(control-racket-launcher #t)
 
-(define socket (udp-open-socket "localhost" 34543))
 
 
 
